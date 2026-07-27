@@ -73,6 +73,10 @@ def rsqrt(x: FxR, iters: int = 6) -> FxR:
 _INV_Q_BY_P = {63: _INV_Q_P63.re, 127: _INV_Q_P127.re}
 _RECIP_BINADE = 13
 
+# Loop-invariant constants, hoisted out of nr_reciprocal.
+_SEED_AT_MY = {p: retag_fxr(s, s.m + 1) for p, s in _INV_Q_BY_P.items()}
+_TWO_BY_P = {p: FxR.from_int(2, m=2, p=p) for p in _INV_Q_BY_P}
+
 
 @beartype
 def nr_reciprocal(b: FxR) -> FxR:
@@ -98,14 +102,13 @@ def nr_reciprocal(b: FxR) -> FxR:
     # otherwise cost ~1 bit of loop accuracy per binade of slack.
     b_norm = retag_fxr(FxR(x=b.x, m=b.m - k, p=p), _RECIP_BINADE + 1)
 
-    seed = _INV_Q_BY_P[p]                            # 1/q (m ≈ -13)
     # 1/b' ∈ (2^-14, 2^-13] ⇒ tight bound m_y = seed.m+1; running the loop at m_y
     # also keeps it off x = 2^p at the b_norm = 2^13 boundary.
-    m_y = seed.m + 1
-    y = retag_fxr(seed, m_y)                   # 1/q at m_y
+    y = _SEED_AT_MY[p]                               # 1/q at m_y (hoisted)
+    m_y = y.m
     if b.x < 0:
         y = FxR(x=-y.x, m=m_y, p=p)                  # sign(b)/q
-    two = FxR.from_int(2, m=2, p=p)
+    two = _TWO_BY_P[p]
     for _ in range(7 if p > 63 else 6):
         by = b_norm * y                        # b'·y ≈ 1 at m = 14 + m_y = 2 (the sub below asserts it)
         diff = two - by                              # 2 − b'·y ≈ 1 (m=2)

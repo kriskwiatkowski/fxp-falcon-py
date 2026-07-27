@@ -33,8 +33,9 @@ def _saturating_fxc(m):
 
 def test_modulus_check_catches_violation_only_when_enabled():
     args = _saturating_fxc(m=5)
-    # Off (default): the modulus violation passes — only the FxR bound is checked.
-    FxC(**args)
+    # Off: the modulus violation passes — only the FxR bound is checked.
+    with check_modulus(False):
+        FxC(**args)
     # On: the same construction must raise.
     raised = False
     try:
@@ -59,8 +60,9 @@ def test_check_modulus_restores_previous_setting():
         except AssertionError:
             raised = True
         assert raised
-    # fully restored to the module default (off) — no raise.
-    FxC(**_saturating_fxc(m=5))
+    # With the check off, the same construction must not raise.
+    with check_modulus(False):
+        FxC(**_saturating_fxc(m=5))
 
 
 def test_deployed_pipeline_respects_modulus():

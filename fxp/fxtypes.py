@@ -67,7 +67,8 @@ def _bankers_shift(x: int, n: int) -> int:
     return q
 
 
-@beartype
+# No @beartype: the invariants are asserts (see above), and this type is built
+# ~300k times per key expansion. Module-level functions keep theirs.
 @dataclass(frozen=True, slots=True, kw_only=True)
 class FxR:
     """
@@ -129,8 +130,9 @@ class FxR:
         return FxR(x=self.x + other.x, m=self.m, p=self.p)
 
     def __sub__(self, other: FxR) -> FxR:
-        """Exact difference in the common (m, p)."""
-        return self + (-other)
+        """Exact difference in the common (m, p). Overflow raises via __post_init__."""
+        assert (self.m, self.p) == (other.m, other.p), f"FxR -: (m,p) {(self.m, self.p)} != {(other.m, other.p)}"
+        return FxR(x=self.x - other.x, m=self.m, p=self.p)
 
     def __mul__(self, other: FxR) -> FxR:
         """Round-to-nearest-even of (self * other) in FX_{m_a+m_b, p}.
@@ -139,9 +141,27 @@ class FxR:
         preserved via a round-to-nearest-even shift of p bits on the
         exact integer product. Rounding error at most 2^{m_a+m_b-p-1}.
         """
+        return self.mul_to(other, self.m + other.m)
+
+    def mul_to(self, other: FxR, m_out: int) -> FxR:
+        """Real multiply emitting directly at m_out, with a SINGLE round.
+
+        Mirror of `FxC.mul_to`. The exact integer product is shifted straight to
+        m_out, so the result carries the full p bits available at that tag.
+        m_out < m_a+m_b is the useful direction (tighten onto a known bound);
+        m_out > m_a+m_b deliberately coarsens. The |x| < 2^p invariant is
+        checked by __post_init__ — loud on overflow.
+        """
         assert self.p == other.p, f"FxR *: p {self.p} != {other.p}"
-        x = _bankers_shift(self.x * other.x, self.p)
-        return FxR(x=x, m=self.m + other.m, p=self.p)
+        e = self.x * other.x                      # exact
+        s = self.p + m_out - self.m - other.m     # total shift to land at m_out
+        if s > 0:
+            x = _bankers_shift(e, s)
+        elif s == 0:
+            x = e
+        else:
+            x = e << (-s)
+        return FxR(x=x, m=m_out, p=self.p)
 
     # ---- debug ------------------------------------------------------
 
@@ -149,7 +169,7 @@ class FxR:
         return f"FxR(x={self.x}, m={self.m}, p={self.p}) ~ {self.to_float()}"
 
 
-@beartype
+# No @beartype, as for FxR.
 @dataclass(frozen=True, slots=True, kw_only=True)
 class FxC:
     """Complex fixed-point number in cFX_{m,p}: two FxRs with same (m,p).

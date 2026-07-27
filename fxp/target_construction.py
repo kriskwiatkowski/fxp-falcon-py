@@ -15,7 +15,7 @@ from fft import fft  # noqa: E402
 from ntt import mul_zq  # noqa: E402
 from common import q as FALCON_Q  # noqa: E402
 
-from fxtypes import FxR, retag_fxr  # noqa: E402
+from fxtypes import FxR  # noqa: E402
 from fft_fxp import fft_fxp, mul_fft_to  # noqa: E402
 from fxp_constants_p63 import INV_Q_FXC  # noqa: E402  (m=-13, |1/q| ≈ 2^-13.586 < 2^-13)
 from m_budgets import (  # noqa: E402
@@ -136,8 +136,7 @@ def _build_t_standard_fxp(sk, point, m_sign):
     """
     [_, b_fxc], [_, d_fxc] = _build_B0_fft_fxp_cache(sk)  # fft(−f) @M_B_FG, fft(−F) @M_B_FG_UP
     inv_q = INV_Q_FXC.re
-    cq = [retag_fxr(FxR.from_int(ci, m=M_POINT_COEF, p=inv_q.p) * inv_q,
-                    M_CQ_COEF)                            # 1 → 0: exact shift
+    cq = [FxR.from_int(ci, m=M_POINT_COEF, p=inv_q.p).mul_to(inv_q, M_CQ_COEF)
           for ci in point]
     cq_fft = fft_fxp(cq)                                  # m = M_CQ_COEF + 9 = 9
     t0 = mul_fft_to(cq_fft, d_fxc, m_sign)

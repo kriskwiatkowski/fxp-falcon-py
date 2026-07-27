@@ -49,6 +49,9 @@ def ldl_fft_fxp(G: Gram) -> tuple[PolyC, PolyR, PolyR]:
     assert all(m == M_D for m in ms), f"ldl_fft_fxp: G entries {ms} != M_D={M_D}"
     L10 = div_fft_fxp(G10, G00, m_out=M_L10_INNER)
     prod = mul_fft_fxp(adj_fft_fxp(L10), G10)        # = |G10|²/G00, real (im == 0)
+    # The subtraction below needs prod at M_D; the natural tag lands there only
+    # because M_L10_INNER = 0.
+    assert prod[0].m == M_D, f"ldl_fft_fxp: prod at m={prod[0].m}, want M_D={M_D}"
     D11 = [g00 - pr.re for g00, pr in zip(G00, prod)]
     return L10, G00, D11
 
@@ -75,7 +78,7 @@ def ldl_fft_fxp_ntru_root(G: RootGram, q: int) -> tuple[PolyC, PolyR, PolyR]:
     # constant at m = 28, the largest tag of the whole pipeline). Costs one
     # extra rounding at ULP ≤ 2^-57 — buried under the M_D retag (2^-45).
     q_fxr = FxR.from_int(q, m=q.bit_length(), p=p)
-    D11 = [retag_fxr(q_fxr * (q_fxr * nr_reciprocal(u)), M_D) for u in G00]
+    D11 = [q_fxr.mul_to(q_fxr * nr_reciprocal(u), M_D) for u in G00]
     return L10, D00, D11
 
 
@@ -95,11 +98,11 @@ def _normalize_leaf_poly(poly, inv_sigma: FxR, sigmin: FxR, iters: int):
     a_re = retag_fxr(poly[0], M_D_LEAF)
     y = rsqrt(a_re, iters=iters)
     sqrt_D = a_re * y                                              # √D_ii
-    inv_sigma_i = retag_fxr(sqrt_D * inv_sigma, M_NORM_OUT)  # 1/σ_i (m=0)
-    inv_sq = inv_sigma_i * inv_sigma_i
-    half = FxR(x=inv_sq.x, m=inv_sq.m - 1, p=inv_sq.p)            # ÷2 exact
-    dss_i = retag_fxr(half, M_NORM_OUT)                      # 1/(2σ_i²)
-    ccs_i = retag_fxr(sigmin * inv_sigma_i, M_NORM_OUT)      # σ_min/σ_i
+    inv_sigma_i = sqrt_D.mul_to(inv_sigma, M_NORM_OUT)       # 1/σ_i (m=0)
+    # Square at M_NORM_OUT+1 so the ÷2 below is a label-only shift.
+    inv_sq = inv_sigma_i.mul_to(inv_sigma_i, M_NORM_OUT + 1)
+    dss_i = FxR(x=inv_sq.x, m=M_NORM_OUT, p=inv_sq.p)        # 1/(2σ_i²)
+    ccs_i = sigmin.mul_to(inv_sigma_i, M_NORM_OUT)           # σ_min/σ_i
     return [dss_i, ccs_i]
 
 

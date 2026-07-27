@@ -17,16 +17,17 @@ Since the halves already sit at m, the butterfly is one twiddle mul (emit at
 m, |w|=1 preserves modulus) plus an EXACT add — one rounding per butterfly,
 no f0 widen. The recursion `_fft_at` is retag-free by construction.
 
-The inverse FFT is separate: `split_complex_fxp` preserves m (the ÷2 offsets
-the twiddle mul's +1), so `ifft_fxp` is m-preserving throughout.
+The inverse FFT is separate: `split_complex_fxp` preserves m, one rounding per
+half — both are formed on the exact integer mantissas and shifted once (the ÷2
+and the twiddle mul fold into that shift), so `ifft_fxp` is m-preserving and
+retag-free throughout.
 
-Magnitude changes use `retag_fxc` (value-preserving): the uncertified input
-retag, and bringing split's f1 back to m. Split's ÷2 is a label-only retag.
+The only `retag` in this module is `fft_fxp`'s uncertified input retag.
 """
 
 from beartype import beartype
 
-from fxtypes import FxR, FxC, PolyR, PolyC, retag_fxr, retag_fxc
+from fxtypes import FxR, FxC, PolyR, PolyC, retag_fxr, _bankers_shift
 from fxp_constants_p63 import roots_dict_fxp as _roots_p63
 from fxp_constants_p127 import roots_dict_fxp as _roots_p127
 from nr_fxp import nr_reciprocal
@@ -158,6 +159,7 @@ def sub_fft_fxp(f: PolyC, g: PolyC) -> PolyC:
 
 @beartype
 def mul_fft_fxp(f: PolyC, g: PolyC) -> PolyC:
+    """Pointwise multiply at the natural (tight) tag m_a+m_b."""
     return [a * b for a, b in zip(f, g)]
 
 @beartype
@@ -183,8 +185,8 @@ def div_fft_fxp(f: PolyC, g: PolyR, m_out: int) -> PolyC:
     out = []
     for a, b in zip(f, g):
         r = nr_reciprocal(b)                         # 1/g[i]
-        out.append(FxC(re=retag_fxr(a.re * r, m_out),
-                       im=retag_fxr(a.im * r, m_out)))
+        out.append(FxC(re=a.re.mul_to(r, m_out),
+                       im=a.im.mul_to(r, m_out)))
     return out
 
 
@@ -199,19 +201,24 @@ def split_complex_fxp(f_fft: PolyC) -> tuple[PolyC, PolyC]:
     n = len(f_fft)
     w = _roots_for(f_fft[0].p)[n]
     m, p = f_fft[0].m, f_fft[0].p
+    m_w = w[0].m
     f0 = [None] * (n // 2)
     f1 = [None] * (n // 2)
 
-    def _halve(z):
-        # Exact ÷2: keep the mantissa, drop the exponent (m+1) → m.
-        return FxC(re=FxR(x=z.re.x, m=m, p=p), im=FxR(x=z.im.x, m=m, p=p))
-
+    # Both halves: exact integer mantissas, rounded once. |x_A ± x_B| reaches
+    # 2^{p+1} transiently, hence no intermediate FxR is built.
     for i in range(n // 2):
-        a = retag_fxc(f_fft[2 * i], m + 1)
-        b = retag_fxc(f_fft[2 * i + 1], m + 1)
-        f0[i] = _halve(a + b)
-        f1_wide = _halve(a - b) * w[2 * i].conjugate()  # mul widens to m+1
-        f1[i] = retag_fxc(f1_wide, m)             # lossless left-shift to m
+        A, B = f_fft[2 * i], f_fft[2 * i + 1]
+        # f0 = (A+B)/2 at m: one banker's shift of the exact sum.
+        f0[i] = FxC(re=FxR(x=_bankers_shift(A.re.x + B.re.x, 1), m=m, p=p),
+                    im=FxR(x=_bankers_shift(A.im.x + B.im.x, 1), m=m, p=p))
+        # f1 = (A−B)/2·conj(w) at m: the ÷2 folds into the product's shift.
+        d_re, d_im = A.re.x - B.re.x, A.im.x - B.im.x
+        wc = w[2 * i]
+        u_re, u_im = wc.re.x, -wc.im.x                 # conj(w)
+        s = p + 1 - m_w
+        f1[i] = FxC(re=FxR(x=_bankers_shift(d_re * u_re - d_im * u_im, s), m=m, p=p),
+                    im=FxR(x=_bankers_shift(d_re * u_im + d_im * u_re, s), m=m, p=p))
     return f0, f1
 
 
