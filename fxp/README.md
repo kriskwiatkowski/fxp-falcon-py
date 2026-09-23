@@ -79,6 +79,25 @@ context-specific lower bound on the divisor), so the caller supplies it.
 
 ## Key numerical tricks
 
+### In the forward FFT (`fft_fxp`)
+
+- **FFT-new** (self-adjoint decomposition): `fft_fxp` decomposes its input
+  `c = a + X^{n/2}·b` into two self-adjoint halves and FFTs each with
+  real-only butterflies (one real multiply per pair instead of a full
+  complex multiply), following *"Toward a Fixed-Point Implementation of
+  FN-DSA with Improved Performance"* (eprint 2026/1915, §3.2-3.3:
+  FFT-selfadj-new / FFT-new). Forward direction only — `ifft_fxp` stays on
+  the classic split/merge recursion (5 forward FFTs vs. 2 inverse per
+  signature, so this still captures most of the win; see `fft_fxp.py`'s
+  "Forward FFT" section docstring for why the inverse was left out of this
+  pass). Kept in this file's existing "redundant, length-n" representation
+  rather than the paper's packed half-size layout, so it nets a real 2x cut
+  in raw integer multiplies on Falcon-512 (measured: 8192 → 4096 per
+  forward FFT), not the paper's ~4x — see the module docstring for the
+  accounting. Same external representation and `certified` contract as
+  before, so `ffldl_fxp`/`ffsampling_fxp`/`target_construction`/
+  `sign_tweak` are unchanged. See `tests/test_fft_new.py`.
+
 ### In ffLDL / LDL (keygen)
 
 - **Symplectic D_11 at the NTRU root**: `det(G_root) = q²` by construction,
@@ -152,6 +171,9 @@ The empirical evidence behind each bound, and the precision benchmarks
 
 - `tests/test_fxtypes.py` — unit tests covering FxR/FxC
   arithmetic, invariants, and edge cases.
+- `tests/test_fft_new.py` — FFT-new vs. the float64 reference (both
+  `certified` modes, edge polys, an adj/conj algebraic check, and a strict
+  `|z| < 2^m` pass via `check_modulus()`).
 - `tests/check_test_vectors.py` — ~60 end-to-end test vectors
   pinning the numerical behaviour of the FFT / ffLDL / division layers.
 - `tests/smoke_test_e2e.py` — **integration smoke runner**.
