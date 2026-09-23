@@ -23,8 +23,13 @@ jobs:
         # experiments dependency group (mpmath, matplotlib)
         run: uv run pytest -q tests/
 
-      - name: Numerical test vectors (fxp pipeline KAT)
-        run: uv run python tests/check_test_vectors.py
+      - name: End-to-end smoke test (KAT + full NTRUGen/sign/verify)
+        # Full (non --fast) run: also exercises experiments/sign_fxp_end_to_end.py,
+        # a real keygen + 50-signature sign/verify round trip across all four
+        # pipeline variants (std/tweak x ref/fxp) — the layer that actually
+        # exercises fft_fxp's FFT-new path end-to-end, not just KAT vectors.
+        # ~20-100s depending on runner speed.
+        run: uv run python tests/smoke_test_e2e.py
 
       - name: Falcon reference self-test (SamplerZ + signature KATs)
         run: PYTHONPATH=. uv run python falcon_ref/test.py
